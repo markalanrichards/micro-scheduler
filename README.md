@@ -4,15 +4,33 @@ The goal of this project is demonstrate a simple quartz cluster configured indep
 
 This may not be far off production ready.
 
-To run this locally execute `docker-compose up --build`
+## How to use in your cloud?
+1. You need a task identifiable by a UUID
+2. Run a server that listens to a queue named by the task UUID
+3. Define a job in with the same UUID and a Quartz Cron (see curl below)
 
-Next steps
+You will likely want to store metadata about the job (maybe name, description, version, etc) in another service.
+There might be other systems that wish to trigger the same task, perhaps on user request and this separation lends well to this. 
+
+There is a source field, which might be uesful to store a URN or similar.
+
+
+## Next steps
 * Helm chart?
 * Expose config
 * Add tests
 * Improve UI (maybe an HTML ui?)
 * Extend amqp options to other queuing systems like SQS, JMS, etc
 * Improve multistage build caching
+* Metrics
+* Not happy with `source` field
+
+
+
+
+## Running
+To run this locally execute `docker-compose up --build`
+
 
 get jobs
 ```

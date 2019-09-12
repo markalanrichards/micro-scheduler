@@ -97,7 +97,6 @@ public class AmqpClient {
 
     public Consuming consume(final String queueName, Consumer<String> consumer) throws IOException, TimeoutException {
         return new Consuming(factory, queueName, consumer);
-
     }
 
 }

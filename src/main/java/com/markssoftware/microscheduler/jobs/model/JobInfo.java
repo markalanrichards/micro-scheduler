@@ -1,4 +1,4 @@
-package com.markssoftware.microscheduler.jobs;
+package com.markssoftware.microscheduler.jobs.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

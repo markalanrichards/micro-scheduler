@@ -1,8 +1,7 @@
 package com.markssoftware.microscheduler;
 
-import com.markssoftware.microscheduler.amqp.AmqpClient;
-import com.markssoftware.microscheduler.amqp.AmqpJob;
-import com.markssoftware.microscheduler.config.Config;
+import com.markssoftware.microscheduler.rabbitmq.AmqpClient;
+import com.markssoftware.microscheduler.rabbitmq.AmqpJob;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.quartz.Scheduler;
@@ -23,12 +22,12 @@ public class Worker {
             scheduler.setJobFactory((triggerFiredBundle, scheduler1) -> new AmqpJob(amqpClient));
             scheduler.start();
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                try {
-                    scheduler.shutdown();
-                } catch (SchedulerException e) {
-                    LOGGER.warn("Unexpected shutdown exception", e);
-                }
-            })
+                        try {
+                            scheduler.shutdown();
+                        } catch (SchedulerException e) {
+                            LOGGER.warn("Unexpected shutdown exception", e);
+                        }
+                    })
             );
             Thread.currentThread().join();
 

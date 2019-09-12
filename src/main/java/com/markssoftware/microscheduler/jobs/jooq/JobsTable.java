@@ -1,9 +1,12 @@
-package com.markssoftware.microscheduler.jooq;
+package com.markssoftware.microscheduler.jobs.jooq;
 
-import com.markssoftware.microscheduler.jobs.JobInfo;
+import com.markssoftware.microscheduler.jobs.model.JobInfo;
 import org.eclipse.collections.api.set.ImmutableSet;
 import org.eclipse.collections.impl.collector.Collectors2;
 import org.jooq.Configuration;
+import org.jooq.DSLContext;
+import org.jooq.Record3;
+import org.jooq.Select;
 import org.jooq.Table;
 import org.jooq.TableField;
 import org.jooq.impl.CustomRecord;
@@ -49,15 +52,29 @@ public class JobsTable extends CustomTable<JobsTable.JobsRecord> {
     }
 
     public void save(JobInfo jobInfo, Configuration configuration) {
-        DSL.using(configuration).insertInto(this)
-                .set(uuid, getBytesFromUUID(jobInfo.getUuid()))
-                .set(cron, jobInfo.getCron())
-                .set(source, jobInfo.getSource())
-                .execute();
+        try (DSLContext dslContext = DSL.using(configuration)) {
+            dslContext.insertInto(this)
+                    .set(uuid, getBytesFromUUID(jobInfo.getUuid()))
+                    .set(cron, jobInfo.getCron())
+                    .set(source, jobInfo.getSource())
+                    .execute();
+        }
     }
 
     public ImmutableSet<JobInfo> jobs(Configuration configuration) {
-        return Arrays.stream(DSL.using(configuration).select(uuid, cron, source).from(this).forUpdate().fetchArray())
+        try (DSLContext using = DSL.using(configuration)) {
+            return fetchAndTransformJobsRecords(using.select(uuid, cron, source).from(this));
+        }
+    }
+
+    public ImmutableSet<JobInfo> jobsForUpdate(Configuration configuration) {
+        try (DSLContext dslContext = DSL.using(configuration)) {
+            return fetchAndTransformJobsRecords(dslContext.select(uuid, cron, source).from(this).forUpdate());
+        }
+    }
+
+    private ImmutableSet<JobInfo> fetchAndTransformJobsRecords(Select<Record3<byte[], String, String>> selectQuery) {
+        return Arrays.stream(selectQuery.fetchArray())
                 .map(record -> JobInfo.builder()
                         .cron(record.get(cron))
                         .source(record.get(source))
@@ -65,6 +82,13 @@ public class JobsTable extends CustomTable<JobsTable.JobsRecord> {
                         .build())
                 .collect(Collectors2.toImmutableSet());
     }
+
+    public void delete(UUID name, Configuration configuration) {
+        try (DSLContext dslContext = DSL.using(configuration)) {
+            dslContext.delete(this).where(uuid.eq(getBytesFromUUID(name))).execute();
+        }
+    }
+
 
     static class JobsRecord extends CustomRecord<JobsRecord> {
 

@@ -1,4 +1,4 @@
-package com.markssoftware.microscheduler.config;
+package com.markssoftware.microscheduler;
 
 import lombok.Builder;
 import lombok.NonNull;

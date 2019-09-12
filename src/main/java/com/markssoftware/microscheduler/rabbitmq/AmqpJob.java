@@ -1,13 +1,9 @@
-package com.markssoftware.microscheduler.amqp;
+package com.markssoftware.microscheduler.rabbitmq;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.quartz.Job;
 import org.quartz.JobExecutionContext;
-import org.quartz.JobExecutionException;
-
-import java.io.IOException;
-import java.util.concurrent.TimeoutException;
 
 
 public class AmqpJob implements Job {
@@ -19,13 +15,9 @@ public class AmqpJob implements Job {
     }
 
     @Override
-    public void execute(JobExecutionContext jobExecutionContext) throws JobExecutionException {
+    public void execute(JobExecutionContext jobExecutionContext) {
         String name = jobExecutionContext.getJobDetail().getKey().getName();
-        try {
-            amqpClient.send(name);
-        } catch (IOException | TimeoutException e) {
-            throw new JobExecutionException(e);
-        }
+        amqpClient.send(name);
         logger.info("Executed {}", name);
     }
 }

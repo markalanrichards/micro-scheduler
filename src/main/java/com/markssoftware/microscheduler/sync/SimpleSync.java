@@ -1,9 +1,10 @@
 package com.markssoftware.microscheduler.sync;
 
-import com.markssoftware.microscheduler.amqp.AmqpClient;
-import com.markssoftware.microscheduler.amqp.AmqpJob;
-import com.markssoftware.microscheduler.jobs.JobInfo;
-import com.markssoftware.microscheduler.jooq.JobsTable;
+import com.markssoftware.microscheduler.jobs.model.JobInfo;
+import com.markssoftware.microscheduler.jobs.repository.JobsRepository;
+import com.markssoftware.microscheduler.quartz.SchedulerService;
+import com.markssoftware.microscheduler.rabbitmq.AmqpClient;
+import com.markssoftware.microscheduler.rabbitmq.AmqpJob;
 import lombok.Builder;
 import lombok.Value;
 import org.apache.logging.log4j.LogManager;
@@ -12,80 +13,76 @@ import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.map.MutableMap;
 import org.eclipse.collections.api.partition.set.PartitionImmutableSet;
 import org.eclipse.collections.api.set.ImmutableSet;
-import org.eclipse.collections.impl.factory.Sets;
-import org.jooq.DSLContext;
-import org.quartz.*;
-import org.quartz.impl.matchers.GroupMatcher;
+import org.quartz.CronTrigger;
+import org.quartz.JobDetail;
+import org.quartz.JobKey;
+import org.quartz.Trigger;
+import org.quartz.TriggerKey;
 
-import java.io.IOException;
 import java.util.Optional;
-import java.util.concurrent.TimeoutException;
 
-public class SimpleSync implements AutoCloseable {
+import static com.markssoftware.microscheduler.sync.SyncConfig.groupName;
+
+public class SimpleSync implements Runnable {
     private static final Logger LOGGER = LogManager.getLogger(SimpleSync.class);
-    private static final String groupName = "GROUP_NAME";
-    private static final String SYNC_QUEUE = "sync";
-    private final Scheduler scheduler;
-    private final JobsTable jobsTable;
-    private final DSLContext dslContext;
+
+
+    private final SchedulerService schedulerService;
+    private final JobsRepository jobsRepository;
     private final AmqpClient amqpClient;
-    private final AmqpClient.Consuming syncing;
 
-
-    public SimpleSync(Scheduler scheduler, JobsTable jobsTable, DSLContext dslContext, AmqpClient amqpClient) throws IOException, TimeoutException {
-        this.scheduler = scheduler;
-        this.jobsTable = jobsTable;
-        this.dslContext = dslContext;
+    public SimpleSync(SchedulerService schedulerService, JobsRepository jobsRepository, AmqpClient amqpClient) {
+        this.schedulerService = schedulerService;
+        this.jobsRepository = jobsRepository;
         this.amqpClient = amqpClient;
-        amqpClient.createChannel(SYNC_QUEUE);
-        syncing = amqpClient.consume(SYNC_QUEUE, s -> this.executeSync());
     }
 
-    public void queueSync() throws IOException, TimeoutException {
-        amqpClient.createChannel(SYNC_QUEUE);
-        amqpClient.send(SYNC_QUEUE);
-    }
 
-    private void executeSync() {
+    public void run() {
         LOGGER.info("Syncing");
-        dslContext.transaction(configuration -> {
-            ImmutableSet<JobInfo> jobInfos = jobsTable.jobs(configuration);
-            final MutableMap<String, ValidateJobInfoHasKeys> toValidates = Maps.mutable.empty();
-            jobInfos.forEach(jobInfo -> {
-                final String name = jobInfo.getUuid().toString();
-                toValidates.put(name, ValidateJobInfoHasKeys.builder().jobInfo(jobInfo).name(name).jobKey(Optional.empty()).triggerKey(Optional.empty()).build());
-            });
-            allTriggers().forEach(triggerKey -> {
-                String name = triggerKey.getName();
-                if (toValidates.containsKey(name)) {
-                    ValidateJobInfoHasKeys validateJobInfoHasKeys = toValidates.get(name);
-                    if (validateJobInfoHasKeys.triggerKey.isPresent()) {
-                        deleteTrigger(triggerKey);
-                    } else {
-                        toValidates.put(name, validateJobInfoHasKeys.toBuilder().triggerKey(Optional.of(triggerKey)).build());
-                    }
-                } else {
-                    deleteTrigger(triggerKey);
-                }
-            });
-            allJobs().forEach(jobKey -> {
-                String name = jobKey.getName();
-                if (toValidates.containsKey(name)) {
-                    ValidateJobInfoHasKeys validateJobInfoHasKeys = toValidates.get(name);
-                    if (validateJobInfoHasKeys.jobKey.isPresent()) {
-                        deleteJob(jobKey);
-                    } else {
-                        toValidates.put(name, validateJobInfoHasKeys.toBuilder().jobKey(Optional.of(jobKey)).build());
-                    }
-                } else {
-                    deleteJob(jobKey);
-                }
-            });
-            validate(toValidates.valuesView().toSet().toImmutable());
-        });
+        try {
+            jobsRepository.lockWithJobInfos(jobInfos -> validateAndReturnMissingJobs(getCurrentState(jobInfos)));
+        } catch (Throwable t) {
+            LOGGER.warn("Error syncing", t);
+        }
     }
 
-    private void validate(ImmutableSet<ValidateJobInfoHasKeys> toValidates) {
+    private ImmutableSet<ValidateJobInfoHasKeys> getCurrentState(ImmutableSet<JobInfo> jobInfos) {
+        final MutableMap<String, ValidateJobInfoHasKeys> toValidates = Maps.mutable.empty();
+        jobInfos.forEach(jobInfo -> {
+            final String name = jobInfo.getUuid().toString();
+            toValidates.put(name, ValidateJobInfoHasKeys.builder().jobInfo(jobInfo).name(name).jobKey(Optional.empty()).triggerKey(Optional.empty()).build());
+        });
+        schedulerService.allTriggers().forEach(triggerKey -> {
+            String name = triggerKey.getName();
+            if (toValidates.containsKey(name)) {
+                ValidateJobInfoHasKeys validateJobInfoHasKeys = toValidates.get(name);
+                if (validateJobInfoHasKeys.triggerKey.isPresent()) {
+                    deleteTrigger(triggerKey);
+                } else {
+                    toValidates.put(name, validateJobInfoHasKeys.toBuilder().triggerKey(Optional.of(triggerKey)).build());
+                }
+            } else {
+                deleteTrigger(triggerKey);
+            }
+        });
+        schedulerService.allJobs().forEach(jobKey -> {
+            String name = jobKey.getName();
+            if (toValidates.containsKey(name)) {
+                ValidateJobInfoHasKeys validateJobInfoHasKeys = toValidates.get(name);
+                if (validateJobInfoHasKeys.jobKey.isPresent()) {
+                    deleteJob(jobKey);
+                } else {
+                    toValidates.put(name, validateJobInfoHasKeys.toBuilder().jobKey(Optional.of(jobKey)).build());
+                }
+            } else {
+                deleteJob(jobKey);
+            }
+        });
+        return toValidates.valuesView().toSet().toImmutable();
+    }
+
+    private void validateAndReturnMissingJobs(ImmutableSet<ValidateJobInfoHasKeys> toValidates) {
         PartitionImmutableSet<ValidateJobInfoHasKeys> partition = toValidates.partition(this::validate);
         ImmutableSet<JobInfo> missingJobs = partition.getRejected().collect(validateJobInfoHasKeys -> {
             validateJobInfoHasKeys.triggerKey.ifPresent(this::deleteTrigger);
@@ -96,97 +93,50 @@ public class SimpleSync implements AutoCloseable {
 
     }
 
+    private void deleteJob(JobKey jobKey) {
+        amqpClient.deleteChannel(jobKey.getName());
+        schedulerService.deleteJob(jobKey);
+    }
+
     private boolean validate(ValidateJobInfoHasKeys validateJobInfoHasKeys) {
-        try {
-            if (validateJobInfoHasKeys.jobKey.filter(jk -> groupName.equals(jk.getGroup())).isEmpty()) {
-                return false;
-            }
-            JobKey jobKey = validateJobInfoHasKeys.jobKey.get();
-            if (validateJobInfoHasKeys.triggerKey.filter(tk -> groupName.equals(tk.getGroup())).isEmpty()) {
-                return false;
-            }
-            TriggerKey triggerKey = validateJobInfoHasKeys.triggerKey.get();
-            JobInfo jobInfo = validateJobInfoHasKeys.getJobInfo();
-            Trigger trigger = scheduler.getTrigger(triggerKey);
-            String source = jobInfo.getSource();
-            if (!source.equals(trigger.getDescription()) || !(trigger instanceof CronTrigger) || !jobInfo.getCron().equals(((CronTrigger) trigger).getCronExpression())) {
-                return false;
-            }
-            JobDetail jobDetail = scheduler.getJobDetail(jobKey);
-            if (!source.equals(jobDetail.getDescription()) || !AmqpJob.class.equals(jobDetail.getJobClass())) {
-                return false;
-            }
-            return true;
-        } catch (SchedulerException e) {
-            LOGGER.warn(e);
+        if (validateJobInfoHasKeys.jobKey.filter(jk -> groupName.equals(jk.getGroup())).isEmpty()) {
             return false;
         }
-
+        JobKey jobKey = validateJobInfoHasKeys.jobKey.get();
+        if (validateJobInfoHasKeys.triggerKey.filter(tk -> groupName.equals(tk.getGroup())).isEmpty()) {
+            return false;
+        }
+        TriggerKey triggerKey = validateJobInfoHasKeys.triggerKey.get();
+        JobInfo jobInfo = validateJobInfoHasKeys.getJobInfo();
+        Trigger trigger = schedulerService.getTrigger(triggerKey);
+        String source = jobInfo.getSource();
+        if (!source.equals(trigger.getDescription()) || !(trigger instanceof CronTrigger) || !jobInfo.getCron().equals(((CronTrigger) trigger).getCronExpression())) {
+            return false;
+        }
+        JobDetail jobDetail = schedulerService.getJobDetail(jobKey);
+        if (!source.equals(jobDetail.getDescription()) || !AmqpJob.class.equals(jobDetail.getJobClass())) {
+            return false;
+        }
+        return true;
     }
 
     private void createNewJobs(ImmutableSet<JobInfo> missingJobs) {
         LOGGER.info("New Jobs {}", missingJobs);
         missingJobs.forEach(jobInfo -> {
-
             try {
                 String name = jobInfo.getUuid().toString();
                 amqpClient.createChannel(name);
-                JobDetail job = JobBuilder.newJob(AmqpJob.class)
-                        .withIdentity(JobKey.jobKey(name, groupName))
-                        .withDescription(jobInfo.getSource())
-                        .build();
-                CronTrigger trigger = TriggerBuilder.newTrigger()
-                        .withIdentity(TriggerKey.triggerKey(name, groupName))
-                        .withDescription(jobInfo.getSource())
-                        .withSchedule(CronScheduleBuilder.cronSchedule(jobInfo.getCron()))
-                        .build();
-                scheduler.scheduleJob(job, trigger);
-            } catch (SchedulerException | IOException | TimeoutException e) {
-                LOGGER.warn(e);
+                schedulerService.createJob(name, jobInfo.getSource(), jobInfo.getCron());
+            } catch (Throwable e) {
+                LOGGER.warn("Error creating new jobs", e);
             }
         });
     }
 
     private void deleteTrigger(TriggerKey triggerKey) {
         LOGGER.info("Deleting trigger {}", triggerKey.getName());
-        try {
-            amqpClient.deleteChannel(triggerKey.getName());
-            scheduler.unscheduleJob(triggerKey);
-        } catch (SchedulerException | IOException | TimeoutException e) {
-            LOGGER.warn(e);
-        }
-    }
-
-    private ImmutableSet<TriggerKey> allTriggers() {
-        try {
-            return Sets.adapt(scheduler.getTriggerKeys(GroupMatcher.anyGroup())).toImmutable();
-        } catch (SchedulerException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private void deleteJob(JobKey jobKey) {
-        LOGGER.info("Deleting job {}", jobKey.getName());
-
-        try {
-            amqpClient.deleteChannel(jobKey.getName());
-            scheduler.deleteJob(jobKey);
-        } catch (SchedulerException | IOException | TimeoutException e) {
-            LOGGER.warn(e);
-        }
-    }
-
-    private ImmutableSet<JobKey> allJobs() {
-        try {
-            return Sets.adapt(scheduler.getJobKeys(GroupMatcher.anyGroup())).toImmutable();
-        } catch (SchedulerException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void close() throws IOException, TimeoutException {
-        syncing.close();
+        amqpClient.deleteChannel(triggerKey.getName());
+        schedulerService.unscheduleJob(triggerKey);
 
     }
 

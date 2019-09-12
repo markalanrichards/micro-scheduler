@@ -1,0 +1,43 @@
+version: "3.7"
+services:
+  mysql:
+    build: ./mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_USER=quartz
+      - MYSQL_PASSWORD=quartz
+      - MYSQL_DATABASE=quartz
+    restart: always
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: always
+    ports:
+      - "15672:15672"
+  worker1:
+    build:
+      target: worker
+      context: ./
+    environment:
+      - mysql_host=mysql
+      - rabbitmq_host=rabbitmq
+    restart: always
+
+  worker2:
+    build:
+      target: worker
+      context: ./
+    environment:
+      - mysql_host=mysql
+      - rabbitmq_host=rabbitmq
+    restart: always
+  ui:
+    build:
+      target: ui
+      context: ./
+    environment:
+      - mysql_host=mysql
+      - rabbitmq_host=rabbitmq
+    ports:
+      - "8080:8080"
+    restart: always

@@ -27,7 +27,7 @@ public class Config {
     String jobStoreClusterCheckinInterval = "20000";
     String myDsDriver = "com.mysql.cj.jdbc.Driver";
     @NonNull
-    String mysqlHost = getEnvOrDefault("mysql_host", "localhost");
+    String mysqlHost = getEnvOrDefault("mysql_host", "localhost:13306");
     String rabbitmqHost = getEnvOrDefault("rabbitmq_host", "localhost");
     String myDsUser = "quartz";
     String myDsPassword = "quartz";

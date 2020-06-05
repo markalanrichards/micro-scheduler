@@ -18,6 +18,8 @@ public class AmqpClient {
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost(host);
         factory.useNio();
+        factory.setUsername("guest");
+        factory.setPassword("guest");
         factory.setAutomaticRecoveryEnabled(true);
         this.factory = factory;
 

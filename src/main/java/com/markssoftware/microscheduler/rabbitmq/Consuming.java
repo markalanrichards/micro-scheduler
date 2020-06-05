@@ -1,9 +1,12 @@
 package com.markssoftware.microscheduler.rabbitmq;
 
+import com.markssoftware.microscheduler.sync.SimpleSync;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.DeliverCallback;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -11,6 +14,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 public class Consuming implements AutoCloseable {
+
+    private static final Logger LOGGER = LogManager.getLogger(Consuming.class);
     private final Connection connection;
     private final Channel channel;
 
@@ -52,6 +57,7 @@ public class Consuming implements AutoCloseable {
             channel.basicConsume(queueName, false, deliverCallback, consumerTag -> {
             });
         } catch (IOException e) {
+            LOGGER.error("Cannot consume", e);
             close();
         }
     }

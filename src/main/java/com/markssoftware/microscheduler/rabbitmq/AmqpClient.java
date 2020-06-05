@@ -7,6 +7,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
@@ -26,10 +27,10 @@ public class AmqpClient {
 
     }
 
-    public void send(final String queueName) {
+    public void send(final String queueName, final String message) {
         try (Connection connection = factory.newConnection();
              Channel channel = connection.createChannel()) {
-            channel.basicPublish("", queueName, null, queueName.getBytes());
+            channel.basicPublish("", queueName, null, message.getBytes(StandardCharsets.UTF_8));
             LOGGER.info("Sent {}", queueName);
         } catch (IOException | TimeoutException e) {
             throw new RuntimeException(e);

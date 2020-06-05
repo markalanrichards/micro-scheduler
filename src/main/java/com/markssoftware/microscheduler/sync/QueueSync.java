@@ -19,7 +19,7 @@ public class QueueSync implements Runnable {
     public void run() {
         try {
             amqpClient.createChannel(SYNC_QUEUE);
-            amqpClient.send(SYNC_QUEUE);
+            amqpClient.send(SYNC_QUEUE,SYNC_QUEUE);
         } catch (Throwable t) {
             LOGGER.warn("Error sending sync request", t);
             throw t;

@@ -20,9 +20,10 @@ public class DeleteJob implements BiFunction<HttpServerRequest, HttpServerRespon
 
     @Override
     public Publisher<Void> apply(HttpServerRequest httpServerRequest, HttpServerResponse httpServerResponse) {
-
-        String param = httpServerRequest.param(this.param);
-        jobsService.deleteJob(UUID.fromString(param));
-        return httpServerResponse.status(204).send();
+        final String param = httpServerRequest.param(this.param);
+        final UUID uuid = UUID.fromString(param);
+        jobsService.deleteJob(uuid);
+        final HttpServerResponse status = httpServerResponse.status(204);
+        return status.send();
     }
 }
